@@ -2,51 +2,164 @@ from flask import Flask, request, render_template_string, redirect, url_for
 import sqlite3
 import secrets
 import os
+import re
 
 app = Flask(__name__)
 
-if os.environ.get("BELMO") or os.environ.get("PORT") == "3000":
-    DB = "/tmp/vibely.db"
-else:
-    DATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data")
-    os.makedirs(DATA_DIR, exist_ok=True)
-    DB = os.path.join(DATA_DIR, "vibely.db")
+# Persistent local storage on Termux.
+# Belmo can override this with DB_PATH if it provides persistent storage.
+DB = os.environ.get(
+    "DB_PATH",
+    os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "vibely.db")
+)
 
-STYLES = {
-    "cute": ("🌸", "Cute", "Soft • Sweet • Lovely", "cute"),
-    "rare": ("💎", "Rare", "Unique • Special • Different", "rare"),
-    "wild": ("🔥", "Wild", "Bold • Free • Powerful", "wild"),
-    "dreamy": ("🌙", "Dreamy", "Dream • Moon • Magic", "dreamy"),
-    "royal": ("👑", "Royal", "Elegant • Luxury • Crown", "royal"),
-    "dark": ("🖤", "Dark", "Mystery • Shadow • Night", "dark")
+os.makedirs(os.path.dirname(DB), exist_ok=True)
+
+MOODS = {
+    "love": {
+        "emoji": "❤️",
+        "title": "Love",
+        "class": "love",
+        "particles": ["❤️", "💕", "💗", "💖", "💘"]
+    },
+    "miss": {
+        "emoji": "🥺",
+        "title": "Miss You",
+        "class": "miss",
+        "particles": ["💕", "🥺", "💭", "💗"]
+    },
+    "sorry": {
+        "emoji": "🥺",
+        "title": "Sorry",
+        "class": "sorry",
+        "particles": ["🥺", "💔", "🌸", "🤍"]
+    },
+    "birthday": {
+        "emoji": "🎂",
+        "title": "Birthday",
+        "class": "birthday",
+        "particles": ["🎉", "🎈", "🎂", "✨", "🎊"]
+    },
+    "night": {
+        "emoji": "🌙",
+        "title": "Good Night",
+        "class": "night",
+        "particles": ["🌙", "⭐", "✨", "💫"]
+    },
+    "friend": {
+        "emoji": "🫶",
+        "title": "Friendship",
+        "class": "friend",
+        "particles": ["🫶", "💛", "✨", "🌸"]
+    },
+    "cute": {
+        "emoji": "🌸",
+        "title": "Cute",
+        "class": "cute",
+        "particles": ["🌸", "💗", "✨", "🦋"]
+    },
+    "hype": {
+        "emoji": "🔥",
+        "title": "Hype",
+        "class": "hype",
+        "particles": ["🔥", "⚡", "💥", "✨"]
+    },
+    "dreamy": {
+        "emoji": "✨",
+        "title": "Dreamy",
+        "class": "dreamy",
+        "particles": ["✨", "🌙", "💫", "🦋"]
+    },
+}
+
+KEYWORDS = {
+    "love": [
+        "love", "lover", "baby", "bby", "babe", "darling",
+        "sweetheart", "crush", "ချစ်", "ချစ်တယ်", "အချစ်",
+        "ချစ်သူ", "ဘေဘီ", "babyလေး"
+    ],
+    "miss": [
+        "miss you", "miss u", "missing you", "လွမ်း",
+        "လွမ်းတယ်", "သတိရ", "သတိရတယ်"
+    ],
+    "sorry": [
+        "sorry", "forgive", "တောင်းပန်", "တောင်းပန်ပါတယ်",
+        "ခွင့်လွှတ်"
+    ],
+    "birthday": [
+        "happy birthday", "birthday", "မွေးနေ့",
+        "မွေးနေ့ပျော်ရွှင်ပါစေ"
+    ],
+    "night": [
+        "good night", "gn", "sweet dreams", "sleep well",
+        "အိပ်တော့", "အိပ်ကောင်းကောင်း", "ညနေကောင်း"
+    ],
+    "friend": [
+        "best friend", "bestie", "friend", "သူငယ်ချင်း",
+        "မိတ်ဆွေ", "အကောင်းဆုံးသူငယ်ချင်း"
+    ],
+    "hype": [
+        "fire", "power", "powerful", "legend", "winner",
+        "win", "champion", "မိုက်", "အမိုက်", "အောင်မြင်"
+    ],
+    "dreamy": [
+        "dream", "dreamy", "magic", "magical", "moon",
+        "star", "stars", "galaxy", "အိပ်မက်", "မှော်",
+        "လ", "ကြယ်"
+    ],
 }
 
 
 def db():
-    # Termux has a writable project directory.
-    # Belmo's /app directory is read-only, so use /tmp there.
-    if os.environ.get("PREFIX", "").startswith("/data/data/com.termux"):
-        data_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data")
-        os.makedirs(data_dir, exist_ok=True)
-        db_path = os.path.join(data_dir, "vibely.db")
-    else:
-        db_path = "/tmp/vibely.db"
-
-    con = sqlite3.connect(db_path)
+    con = sqlite3.connect(DB)
     con.row_factory = sqlite3.Row
 
     con.execute("""
         CREATE TABLE IF NOT EXISTS pages (
             code TEXT PRIMARY KEY,
             text TEXT NOT NULL,
-            style TEXT NOT NULL,
+            mood TEXT NOT NULL,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     """)
     con.commit()
-
     return con
 
+
+def detect_mood(text):
+    t = text.lower().strip()
+
+    # Check longer phrases first.
+    matches = []
+
+    for mood, words in KEYWORDS.items():
+        for word in words:
+            if word.lower() in t:
+                matches.append((len(word), mood))
+
+    if matches:
+        matches.sort(reverse=True)
+        return matches[0][1]
+
+    return "cute"
+
+
+def particle_html(particles):
+    result = []
+
+    for i in range(18):
+        emoji = particles[i % len(particles)]
+        left = (i * 37) % 100
+        delay = (i % 7) * 0.7
+        duration = 6 + (i % 5)
+
+        result.append(
+            f'<span class="particle" '
+            f'style="left:{left}%;animation-delay:{delay}s;'
+            f'animation-duration:{duration}s">{emoji}</span>'
+        )
+
+    return "".join(result)
 
 def init_db():
     con = db()
@@ -57,297 +170,307 @@ HTML = """
 <!DOCTYPE html>
 <html>
 <head>
-
 <meta charset="UTF-8">
-
-<meta name="viewport"
-content="width=device-width,initial-scale=1">
-
+<meta name="viewport" content="width=device-width,initial-scale=1">
 <title>{{ title }}</title>
 
 <style>
-
-*{
-    box-sizing:border-box;
+* {
+    box-sizing: border-box;
 }
 
-body{
-    margin:0;
-    min-height:100vh;
-    font-family:Arial,sans-serif;
-    color:white;
+html, body {
+    margin: 0;
+    min-height: 100%;
+}
 
+body {
+    min-height: 100vh;
+    font-family: Arial, sans-serif;
+    color: white;
+    overflow-x: hidden;
+    transition: background 1s ease;
+}
+
+body.home-bg {
     background:
-    radial-gradient(circle at 20% 10%,#ffffff55,transparent 30%),
-    linear-gradient(135deg,#ffb6e6,#9dbdff);
+        radial-gradient(circle at 20% 10%, #ffffff66, transparent 28%),
+        linear-gradient(135deg,#ffb6e6,#9dbdff);
 }
 
-body.rare{
-    background:linear-gradient(135deg,#172554,#7c3aed);
-}
-
-body.wild{
-    background:linear-gradient(135deg,#ff512f,#7f0000);
-}
-
-body.dreamy{
-    background:linear-gradient(135deg,#667eea,#764ba2);
-}
-
-body.royal{
-    background:linear-gradient(135deg,#3b0764,#a16207);
-}
-
-
-body.cat{
+body.love {
     background:
-    radial-gradient(circle at 20% 20%, #fff5fb 0%, transparent 30%),
-    linear-gradient(135deg,#fbc2eb,#a6c1ee);
+        radial-gradient(circle at 50% 20%, #ffb6e655, transparent 30%),
+        linear-gradient(135deg,#7f1d3d,#db2777,#be185d);
 }
 
-body.flower{
+body.miss {
     background:
-    radial-gradient(circle at 20% 20%, #ffd6e8 0%, transparent 30%),
-    linear-gradient(135deg,#fbc2eb,#f8d9a8);
+        radial-gradient(circle at 70% 15%, #ffffff33, transparent 25%),
+        linear-gradient(135deg,#312e81,#7e22ce,#be185d);
 }
 
-body.ocean{
+body.sorry {
     background:
-    radial-gradient(circle at 80% 10%, #ffffff55 0%, transparent 30%),
-    linear-gradient(135deg,#00c6ff,#0072ff);
+        radial-gradient(circle at 20% 20%, #ffffff33, transparent 25%),
+        linear-gradient(135deg,#334155,#7c3aed,#be123c);
 }
 
-body.night{
+body.birthday {
     background:
-    radial-gradient(circle at 50% 15%, #ffffff33 0%, transparent 25%),
-    linear-gradient(135deg,#0f172a,#312e81,#581c87);
+        radial-gradient(circle at 20% 20%, #ffffff66, transparent 25%),
+        linear-gradient(135deg,#2563eb,#db2777,#f59e0b);
 }
 
-body.fire{
+body.night {
     background:
-    radial-gradient(circle at 70% 20%, #ffd16655 0%, transparent 25%),
-    linear-gradient(135deg,#7f1d1d,#ea580c,#facc15);
+        radial-gradient(circle at 50% 10%, #ffffff33, transparent 25%),
+        linear-gradient(135deg,#020617,#312e81,#581c87);
 }
 
-body.forest{
+body.friend {
     background:
-    radial-gradient(circle at 20% 20%, #bbf7d055 0%, transparent 30%),
-    linear-gradient(135deg,#064e3b,#166534,#365314);
+        radial-gradient(circle at 20% 20%, #ffffff55, transparent 30%),
+        linear-gradient(135deg,#0f766e,#16a34a,#65a30d);
 }
 
-body.sky{
+body.cute {
     background:
-    radial-gradient(circle at 30% 10%, #ffffff66 0%, transparent 30%),
-    linear-gradient(135deg,#38bdf8,#818cf8,#f0abfc);
+        radial-gradient(circle at 20% 10%, #ffffff66, transparent 30%),
+        linear-gradient(135deg,#fbc2eb,#a6c1ee);
 }
 
-body.dark{
-    background:linear-gradient(135deg,#020617,#111827);
+body.hype {
+    background:
+        radial-gradient(circle at 70% 15%, #ffd16666, transparent 25%),
+        linear-gradient(135deg,#7f1d1d,#ea580c,#facc15);
 }
 
-.container{
-    width:100%;
-    max-width:620px;
-    margin:auto;
-    padding:22px 16px;
+body.dreamy {
+    background:
+        radial-gradient(circle at 50% 10%, #ffffff44, transparent 25%),
+        linear-gradient(135deg,#312e81,#7c3aed,#db2777);
 }
 
-.card{
-    padding:28px;
-    border-radius:30px;
-
-    background:rgba(255,255,255,.16);
-
-    border:1px solid rgba(255,255,255,.3);
-
-    backdrop-filter:blur(20px);
-
-    box-shadow:
-    0 25px 70px rgba(0,0,0,.25);
+.container {
+    width: 100%;
+    max-width: 680px;
+    margin: auto;
+    padding: 20px 15px;
+    position: relative;
+    z-index: 2;
 }
 
-.logo{
-    text-align:center;
-    font-size:44px;
-    font-weight:900;
+.card {
+    padding: 28px;
+    border-radius: 30px;
+    background: rgba(255,255,255,.15);
+    border: 1px solid rgba(255,255,255,.30);
+    backdrop-filter: blur(20px);
+    box-shadow: 0 25px 80px rgba(0,0,0,.25);
 }
 
-.subtitle{
-    text-align:center;
-    opacity:.9;
-    margin:8px 0 28px;
+.logo {
+    text-align: center;
+    font-size: 45px;
+    font-weight: 900;
 }
 
-textarea{
-    width:100%;
-    min-height:140px;
-
-    padding:17px;
-
-    border:0;
-    outline:0;
-
-    border-radius:20px;
-
-    font-size:16px;
-
-    resize:vertical;
+.subtitle {
+    text-align: center;
+    opacity: .9;
+    margin: 8px 0 25px;
 }
 
-.styles{
-    display:grid;
-    grid-template-columns:repeat(2,1fr);
-    gap:10px;
-    margin-top:10px;
+textarea {
+    width: 100%;
+    min-height: 150px;
+    padding: 17px;
+    border: 0;
+    outline: 0;
+    border-radius: 20px;
+    font-size: 16px;
+    resize: vertical;
 }
 
-.style{
-    padding:14px;
-
-    border-radius:16px;
-
-    background:rgba(255,255,255,.12);
-
-    text-align:center;
-
-    cursor:pointer;
+button {
+    width: 100%;
+    padding: 16px;
+    margin-top: 15px;
+    border: 0;
+    border-radius: 17px;
+    background: white;
+    color: #7c3aed;
+    font-size: 17px;
+    font-weight: bold;
+    cursor: pointer;
 }
 
-.style input{
-    display:none;
+button:active {
+    transform: scale(.98);
 }
 
-.style:has(input:checked){
-    background:rgba(255,255,255,.4);
-    border:1px solid white;
+.linkbox {
+    margin-top: 20px;
+    padding: 16px;
+    border-radius: 18px;
+    background: rgba(0,0,0,.18);
 }
 
-button{
-    width:100%;
-
-    padding:16px;
-
-    margin-top:18px;
-
-    border:0;
-
-    border-radius:17px;
-
-    background:white;
-
-    color:#6d28d9;
-
-    font-size:17px;
-
-    font-weight:bold;
+.link {
+    display: block;
+    margin-top: 10px;
+    padding: 12px;
+    border-radius: 12px;
+    background: rgba(255,255,255,.14);
+    color: white;
+    text-decoration: none;
+    word-break: break-all;
 }
 
-.linkbox{
-    margin-top:20px;
-
-    padding:16px;
-
-    border-radius:18px;
-
-    background:rgba(0,0,0,.18);
+.actions {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+    margin-top: 10px;
 }
 
-.link{
-    display:block;
-
-    margin-top:10px;
-
-    padding:12px;
-
-    border-radius:12px;
-
-    background:rgba(255,255,255,.12);
-
-    color:white;
-
-    text-decoration:none;
-
-    word-break:break-all;
+.actions button {
+    margin-top: 0;
 }
 
-.vibe{
-    min-height:65vh;
-
-    display:flex;
-
-    flex-direction:column;
-
-    justify-content:center;
-
-    align-items:center;
-
-    text-align:center;
+.vibe {
+    min-height: 70vh;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    text-align: center;
+    position: relative;
 }
 
-.emoji{
-    font-size:75px;
+.emoji {
+    font-size: 75px;
+    animation: pop .8s ease;
 }
 
-.vibe-title{
-    font-size:36px;
-    font-weight:900;
-    margin:12px;
+.vibe-title {
+    font-size: 34px;
+    font-weight: 900;
+    margin: 10px;
 }
 
-.vibe-text{
-    font-size:21px;
-    line-height:1.6;
-
-    white-space:pre-wrap;
-    word-break:break-word;
+.vibe-text {
+    font-size: 22px;
+    line-height: 1.65;
+    white-space: pre-wrap;
+    word-break: break-word;
+    opacity: 0;
+    animation: reveal 1.5s ease forwards;
+    animation-delay: .5s;
 }
 
-.badge{
-    margin-top:18px;
-
-    padding:9px 16px;
-
-    border-radius:30px;
-
-    background:rgba(255,255,255,.18);
+.badge {
+    margin-top: 18px;
+    padding: 9px 16px;
+    border-radius: 30px;
+    background: rgba(255,255,255,.18);
 }
 
-.home{
-    display:inline-block;
-
-    margin-top:25px;
-
-    padding:13px 20px;
-
-    border-radius:15px;
-
-    background:white;
-
-    color:#6d28d9;
-
-    text-decoration:none;
-
-    font-weight:bold;
+.footer {
+    text-align: center;
+    margin-top: 15px;
+    opacity: .65;
+    font-size: 13px;
 }
 
-.footer{
-    text-align:center;
-
-    margin-top:15px;
-
-    opacity:.65;
-
-    font-size:13px;
+.particles {
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    overflow: hidden;
+    z-index: 1;
 }
 
+.particle {
+    position: absolute;
+    bottom: -60px;
+    font-size: 25px;
+    opacity: 0;
+    animation-name: float;
+    animation-timing-function: linear;
+    animation-iteration-count: infinite;
+}
+
+@keyframes float {
+    0% {
+        transform: translateY(0) rotate(0deg) scale(.7);
+        opacity: 0;
+    }
+    15% {
+        opacity: .9;
+    }
+    85% {
+        opacity: .8;
+    }
+    100% {
+        transform: translateY(-115vh) rotate(360deg) scale(1.2);
+        opacity: 0;
+    }
+}
+
+@keyframes pop {
+    from {
+        transform: scale(.3);
+        opacity: 0;
+    }
+    to {
+        transform: scale(1);
+        opacity: 1;
+    }
+}
+
+@keyframes reveal {
+    from {
+        opacity: 0;
+        transform: translateY(15px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+@media(max-width:500px) {
+    .card {
+        padding: 20px;
+        border-radius: 25px;
+    }
+
+    .logo {
+        font-size: 38px;
+    }
+
+    .vibe-title {
+        font-size: 29px;
+    }
+
+    .vibe-text {
+        font-size: 19px;
+    }
+}
 </style>
-
 </head>
 
 <body class="{{ page_class }}">
 
-<div class="container">
+{% if page %}
+<div class="particles">
+{{ particles|safe }}
+</div>
+{% endif %}
 
+<div class="container">
 <div class="card">
 
 {% if page %}
@@ -355,25 +478,23 @@ button{
 <div class="vibe">
 
 <div class="emoji">
-{{ page[0] }}
+{{ page.emoji }}
 </div>
 
 <div class="vibe-title">
-{{ page[1] }}
+{{ page.title }}
 </div>
 
 <div class="vibe-text">
-{{ page[3] }}
+{{ page.text }}
 </div>
 
 <div class="badge">
-{{ page[2] }}
+✨ Created with Vibely
 </div>
 
-<a class="home"
-href="/">
-✨ Create Your Vibely
-</a>
+<a class="home" href="/">
+<button type="button">✨ Create Your Vibely</button></a>
 
 </div>
 
@@ -384,7 +505,7 @@ href="/">
 </div>
 
 <div class="subtitle">
-Turn your words into a unique vibe
+Write a feeling. Vibely turns it into a vibe.
 </div>
 
 <form method="POST">
@@ -392,34 +513,14 @@ Turn your words into a unique vibe
 <textarea
 name="text"
 maxlength="1000"
-placeholder="ကိုယ်လိုချင်တဲ့ပုံစံကိုရေးပါ...
+placeholder="ဥပမာ...
 
-ဥပမာ -
-cute pink cat,
-dreamy sky,
-magical night..."
+Yo baby ❤️
+Good night sweet dreams 🌙
+Happy birthday 🎂
+I miss you 🥺
+Best friend forever 🫶"
 required></textarea>
-
-<div class="styles">
-
-{% for key, value in styles.items() %}
-
-<label class="style">
-
-<input
-type="radio"
-name="style"
-value="{{ key }}"
-{% if key == "cute" %}checked{% endif %}
->
-
-{{ value[0] }} {{ value[1] }}
-
-</label>
-
-{% endfor %}
-
-</div>
 
 <button type="submit">
 ✨ Create My Vibely
@@ -430,14 +531,49 @@ value="{{ key }}"
 {% if link %}
 
 <div class="linkbox">
-
 🔗 Your Vibely Link
 
-<a class="link" href="{{ link }}">
+<a class="link" href="{{ link }}" id="vibelyLink">
 {{ link }}
 </a>
 
+<div class="actions">
+<button type="button" onclick="copyLink()">
+📋 Copy Link
+</button>
+
+<button type="button" onclick="shareLink()">
+📤 Share
+</button>
 </div>
+
+</div>
+
+<script>
+function copyLink() {
+    const link = document.getElementById("vibelyLink").href;
+
+    navigator.clipboard.writeText(link).then(function() {
+        alert("✨ Link copied!");
+    }).catch(function() {
+        prompt("Copy your Vibely link:", link);
+    });
+}
+
+function shareLink() {
+    const link = document.getElementById("vibelyLink").href;
+
+    if (navigator.share) {
+        navigator.share({
+            title: "✨ My Vibely",
+            text: "I made a Vibely for you 💕",
+            url: link
+        });
+    } else {
+        copyLink();
+    }
+}
+</script>
 
 {% endif %}
 
@@ -446,7 +582,7 @@ value="{{ key }}"
 </div>
 
 <div class="footer">
-✨ Vibely
+✨ Vibely • Turn feelings into vibes
 </div>
 
 </div>
@@ -454,50 +590,6 @@ value="{{ key }}"
 </body>
 </html>
 """
-
-
-
-def detect_background(text, style):
-    """
-    Choose a visual background from the user's words.
-    """
-    t = text.lower()
-
-    themes = {
-        "cat": [
-            "cat", "kitten", "kitty", "ကြောင်", "ကြောင်လေး"
-        ],
-        "flower": [
-            "flower", "flowers", "rose", "garden",
-            "ပန်း", "နှင်းဆီ", "ဥယျာဉ်"
-        ],
-        "ocean": [
-            "ocean", "sea", "beach", "wave",
-            "ပင်လယ်", "ကမ်းခြေ", "လှိုင်း"
-        ],
-        "night": [
-            "night", "moon", "star", "stars", "galaxy",
-            "ည", "လ", "ကြယ်", "ကြယ်တွေ", "အာကာသ"
-        ],
-        "fire": [
-            "fire", "flame", "hot", "power",
-            "မီး", "အပူ", "စွမ်းအား"
-        ],
-        "forest": [
-            "forest", "tree", "nature", "jungle",
-            "သစ်တော", "သစ်ပင်", "သဘာဝ"
-        ],
-        "sky": [
-            "sky", "cloud", "clouds", "sunset",
-            "မိုးကောင်းကင်", "တိမ်", "နေဝင်"
-        ]
-    }
-
-    for theme, words in themes.items():
-        if any(word in t for word in words):
-            return theme
-
-    return style
 
 
 @app.route("/", methods=["GET", "POST"])
@@ -508,12 +600,15 @@ def home():
     if request.method == "POST":
 
         text = request.form.get("text", "").strip()
-        style = request.form.get("style", "cute")
 
         if not text:
             return redirect(url_for("home"))
 
-        if style not in STYLES:
+        mood = detect_mood(text)
+
+        style = request.form.get("style", "cute")
+
+        if not style:
             style = "cute"
 
         code = secrets.token_urlsafe(8)
@@ -522,11 +617,10 @@ def home():
 
         con.execute(
             """
-            INSERT INTO pages
-            (code,text,style)
-            VALUES (?,?,?)
+            INSERT INTO pages(code,text,style,mood)
+            VALUES(?,?,?,?)
             """,
-            (code, text, style)
+            (code, text, style, mood)
         )
 
         con.commit()
@@ -538,9 +632,9 @@ def home():
         HTML,
         title="Vibely",
         page=None,
-        page_class="",
-        styles=STYLES,
-        link=link
+        page_class="home-bg",
+        link=link,
+        particles="",
     )
 
 
@@ -551,7 +645,7 @@ def vibe(code):
 
     row = con.execute(
         """
-        SELECT code,text,style
+        SELECT code,text,mood
         FROM pages
         WHERE code=?
         """,
@@ -561,31 +655,23 @@ def vibe(code):
     con.close()
 
     if not row:
-        return """
-        <h1 style="text-align:center">
-        😢 Vibely not found
-        </h1>
-        """, 404
+        return "<h1 style='text-align:center'>😢 Vibely not found</h1>", 404
 
-    style = STYLES.get(
-        row[2],
-        STYLES["cute"]
-    )
+    mood = MOODS.get(row["mood"], MOODS["cute"])
 
-    page = (
-        style[0],
-        style[1],
-        style[2],
-        row[1]
-    )
+    page = {
+        "emoji": mood["emoji"],
+        "title": mood["title"],
+        "text": row["text"],
+    }
 
     return render_template_string(
         HTML,
-        title="Vibely • " + style[1],
+        title="Vibely • " + mood["title"],
         page=page,
-        page_class=detect_background(page[3], row[2]),
-        styles=STYLES,
-        link=None
+        page_class=mood["class"],
+        particles=particle_html(mood["particles"]),
+        link=None,
     )
 
 
@@ -595,14 +681,16 @@ if __name__ == "__main__":
 
     print("")
     print("=========================")
-    print("        VIBELY")
+    print("        VIBELY 2.0")
     print("=========================")
-    print("Database: SQLite")
+    print("Database:", DB)
     print("http://127.0.0.1:5000")
     print("")
 
+    port = int(os.environ.get("PORT", "5000"))
+
     app.run(
         host="0.0.0.0",
-        port=5000,
+        port=port,
         debug=True
     )
