@@ -112,17 +112,35 @@ KEYWORDS = {
 
 
 def db():
-    con = sqlite3.connect(DB)
+    con = sqlite3.connect(DB, timeout=10)
     con.row_factory = sqlite3.Row
 
     con.execute("""
         CREATE TABLE IF NOT EXISTS pages (
             code TEXT PRIMARY KEY,
             text TEXT NOT NULL,
-            mood TEXT NOT NULL,
+            mood TEXT,
+            style TEXT DEFAULT 'cute',
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     """)
+
+    # Upgrade old databases that were created before style was added.
+    columns = {
+        row[1]
+        for row in con.execute("PRAGMA table_info(pages)").fetchall()
+    }
+
+    if "style" not in columns:
+        con.execute(
+            "ALTER TABLE pages ADD COLUMN style TEXT DEFAULT 'cute'"
+        )
+
+    if "mood" not in columns:
+        con.execute(
+            "ALTER TABLE pages ADD COLUMN mood TEXT DEFAULT 'cute'"
+        )
+
     con.commit()
     return con
 
