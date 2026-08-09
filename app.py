@@ -5,8 +5,12 @@ import os
 
 app = Flask(__name__)
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-DB = os.path.join(BASE_DIR, "vibely.db")
+if os.environ.get("BELMO") or os.environ.get("PORT") == "3000":
+    DB = "/tmp/vibely.db"
+else:
+    DATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data")
+    os.makedirs(DATA_DIR, exist_ok=True)
+    DB = os.path.join(DATA_DIR, "vibely.db")
 
 STYLES = {
     "cute": ("🌸", "Cute", "Soft • Sweet • Lovely", "cute"),
