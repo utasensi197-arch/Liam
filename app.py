@@ -6,14 +6,15 @@ import re
 
 app = Flask(__name__)
 
-# Persistent local storage on Termux.
-# Belmo can override this with DB_PATH if it provides persistent storage.
-DB = os.environ.get(
-    "DB_PATH",
-    os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "vibely.db")
-)
-
-os.makedirs(os.path.dirname(DB), exist_ok=True)
+# Writable database path for both Termux and Belmo.
+if os.environ.get("PREFIX", "").startswith("/data/data/com.termux"):
+    DB = os.path.join(
+        os.path.dirname(os.path.abspath(__file__)),
+        "data",
+        "vibely.db"
+    )
+else:
+    DB = "/tmp/vibely.db"
 
 MOODS = {
     "love": {
