@@ -716,6 +716,9 @@ def home():
 
         mood = detect_mood(text)
 
+        # Auto style follows the detected mood
+        style = mood
+
         code = secrets.token_urlsafe(8)
 
         con = db()
