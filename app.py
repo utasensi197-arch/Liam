@@ -2,90 +2,90 @@ from flask import Flask, request, render_template_string, redirect, url_for
 import sqlite3
 import secrets
 import os
-import re
 
 app = Flask(__name__)
 
-# Writable database path for both Termux and Belmo.
+# Termux = persistent local DB
+# Belmo/production = writable temporary DB
 if os.environ.get("PREFIX", "").startswith("/data/data/com.termux"):
-    DB = os.path.join(
-        os.path.dirname(os.path.abspath(__file__)),
-        "data",
-        "vibely.db"
-    )
+    DATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data")
+    os.makedirs(DATA_DIR, exist_ok=True)
+    DB = os.path.join(DATA_DIR, "vibely.db")
 else:
     DB = "/tmp/vibely.db"
+
 
 MOODS = {
     "love": {
         "emoji": "❤️",
         "title": "Love",
         "class": "love",
-        "particles": ["❤️", "💕", "💗", "💖", "💘"]
+        "particles": ["❤️", "💕", "💗", "💖", "💘", "💞"]
     },
     "miss": {
         "emoji": "🥺",
         "title": "Miss You",
         "class": "miss",
-        "particles": ["💕", "🥺", "💭", "💗"]
+        "particles": ["🥺", "💕", "💭", "💗", "💔"]
     },
     "sorry": {
         "emoji": "🥺",
         "title": "Sorry",
         "class": "sorry",
-        "particles": ["🥺", "💔", "🌸", "🤍"]
+        "particles": ["🥺", "💔", "🤍", "🌸"]
     },
     "birthday": {
         "emoji": "🎂",
-        "title": "Birthday",
+        "title": "Happy Birthday",
         "class": "birthday",
-        "particles": ["🎉", "🎈", "🎂", "✨", "🎊"]
+        "particles": ["🎉", "🎈", "🎂", "✨", "🎊", "🥳"]
     },
     "night": {
         "emoji": "🌙",
         "title": "Good Night",
         "class": "night",
-        "particles": ["🌙", "⭐", "✨", "💫"]
+        "particles": ["🌙", "⭐", "✨", "💫", "🌌"]
     },
     "friend": {
         "emoji": "🫶",
         "title": "Friendship",
         "class": "friend",
-        "particles": ["🫶", "💛", "✨", "🌸"]
+        "particles": ["🫶", "💛", "✨", "🌸", "🤝"]
     },
     "cute": {
         "emoji": "🌸",
         "title": "Cute",
         "class": "cute",
-        "particles": ["🌸", "💗", "✨", "🦋"]
+        "particles": ["🌸", "💗", "✨", "🦋", "🌷"]
     },
     "hype": {
         "emoji": "🔥",
         "title": "Hype",
         "class": "hype",
-        "particles": ["🔥", "⚡", "💥", "✨"]
+        "particles": ["🔥", "⚡", "💥", "✨", "🚀"]
     },
     "dreamy": {
         "emoji": "✨",
         "title": "Dreamy",
         "class": "dreamy",
-        "particles": ["✨", "🌙", "💫", "🦋"]
-    },
+        "particles": ["✨", "🌙", "💫", "🦋", "⭐"]
+    }
 }
+
 
 KEYWORDS = {
     "love": [
         "love", "lover", "baby", "bby", "babe", "darling",
         "sweetheart", "crush", "ချစ်", "ချစ်တယ်", "အချစ်",
-        "ချစ်သူ", "ဘေဘီ", "babyလေး"
+        "ချစ်သူ", "ဘေဘီ", "ဘေဘီလေး", "yo baby", "my baby"
     ],
     "miss": [
-        "miss you", "miss u", "missing you", "လွမ်း",
-        "လွမ်းတယ်", "သတိရ", "သတိရတယ်"
+        "miss you", "miss u", "missing you", "i miss",
+        "လွမ်း", "လွမ်းတယ်", "သတိရ", "သတိရတယ်"
     ],
     "sorry": [
-        "sorry", "forgive", "တောင်းပန်", "တောင်းပန်ပါတယ်",
-        "ခွင့်လွှတ်"
+        "sorry", "forgive", "my bad",
+        "တောင်းပန်", "တောင်းပန်ပါတယ်", "ခွင့်လွှတ်"
     ],
     "birthday": [
         "happy birthday", "birthday", "မွေးနေ့",
@@ -93,7 +93,8 @@ KEYWORDS = {
     ],
     "night": [
         "good night", "gn", "sweet dreams", "sleep well",
-        "အိပ်တော့", "အိပ်ကောင်းကောင်း", "ညနေကောင်း"
+        "အိပ်တော့", "အိပ်ကောင်းကောင်း", "ညနေကောင်း",
+        "goodnight"
     ],
     "friend": [
         "best friend", "bestie", "friend", "သူငယ်ချင်း",
@@ -107,53 +108,58 @@ KEYWORDS = {
         "dream", "dreamy", "magic", "magical", "moon",
         "star", "stars", "galaxy", "အိပ်မက်", "မှော်",
         "လ", "ကြယ်"
-    ],
+    ]
 }
 
 
 def db():
-    con = sqlite3.connect(DB, timeout=10)
+    con = sqlite3.connect(DB, timeout=15)
     con.row_factory = sqlite3.Row
 
     con.execute("""
         CREATE TABLE IF NOT EXISTS pages (
             code TEXT PRIMARY KEY,
             text TEXT NOT NULL,
-            mood TEXT,
+            mood TEXT DEFAULT 'cute',
             style TEXT DEFAULT 'cute',
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     """)
 
-    # Upgrade old databases that were created before style was added.
     columns = {
-        row[1]
+        row["name"]
         for row in con.execute("PRAGMA table_info(pages)").fetchall()
     }
-
-    if "style" not in columns:
-        con.execute(
-            "ALTER TABLE pages ADD COLUMN style TEXT DEFAULT 'cute'"
-        )
 
     if "mood" not in columns:
         con.execute(
             "ALTER TABLE pages ADD COLUMN mood TEXT DEFAULT 'cute'"
         )
 
+    if "style" not in columns:
+        con.execute(
+            "ALTER TABLE pages ADD COLUMN style TEXT DEFAULT 'cute'"
+        )
+
     con.commit()
     return con
+
+
+def init_db():
+    con = db()
+    con.close()
 
 
 def detect_mood(text):
     t = text.lower().strip()
 
-    # Check longer phrases first.
     matches = []
 
     for mood, words in KEYWORDS.items():
         for word in words:
-            if word.lower() in t:
+            word = word.lower()
+
+            if word in t:
                 matches.append((len(word), mood))
 
     if matches:
@@ -166,23 +172,22 @@ def detect_mood(text):
 def particle_html(particles):
     result = []
 
-    for i in range(18):
+    for i in range(28):
         emoji = particles[i % len(particles)]
-        left = (i * 37) % 100
-        delay = (i % 7) * 0.7
-        duration = 6 + (i % 5)
+        left = (i * 31) % 100
+        delay = (i % 9) * 0.55
+        duration = 5 + (i % 6)
+        size = 18 + (i % 5) * 5
 
         result.append(
             f'<span class="particle" '
-            f'style="left:{left}%;animation-delay:{delay}s;'
-            f'animation-duration:{duration}s">{emoji}</span>'
+            f'style="left:{left}%;'
+            f'animation-delay:{delay}s;'
+            f'animation-duration:{duration}s;'
+            f'font-size:{size}px">{emoji}</span>'
         )
 
     return "".join(result)
-
-def init_db():
-    con = db()
-    con.close()
 
 
 HTML = """
@@ -190,10 +195,13 @@ HTML = """
 <html>
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="viewport"
+      content="width=device-width,initial-scale=1,maximum-scale=1">
+
 <title>{{ title }}</title>
 
 <style>
+
 * {
     box-sizing: border-box;
 }
@@ -208,54 +216,53 @@ body {
     font-family: Arial, sans-serif;
     color: white;
     overflow-x: hidden;
-    transition: background 1s ease;
 }
 
-body.home-bg {
+body.home {
     background:
-        radial-gradient(circle at 20% 10%, #ffffff66, transparent 28%),
+        radial-gradient(circle at 20% 10%, #ffffff88, transparent 30%),
         linear-gradient(135deg,#ffb6e6,#9dbdff);
 }
 
 body.love {
     background:
-        radial-gradient(circle at 50% 20%, #ffb6e655, transparent 30%),
-        linear-gradient(135deg,#7f1d3d,#db2777,#be185d);
+        radial-gradient(circle at 50% 20%, #ffb6e655, transparent 35%),
+        linear-gradient(135deg,#500724,#be185d,#f43f5e);
 }
 
 body.miss {
     background:
-        radial-gradient(circle at 70% 15%, #ffffff33, transparent 25%),
-        linear-gradient(135deg,#312e81,#7e22ce,#be185d);
+        radial-gradient(circle at 70% 10%, #ffffff33, transparent 25%),
+        linear-gradient(135deg,#1e1b4b,#6d28d9,#be185d);
 }
 
 body.sorry {
     background:
-        radial-gradient(circle at 20% 20%, #ffffff33, transparent 25%),
-        linear-gradient(135deg,#334155,#7c3aed,#be123c);
+        radial-gradient(circle at 20% 15%, #ffffff33, transparent 25%),
+        linear-gradient(135deg,#1e293b,#475569,#7c3aed);
 }
 
 body.birthday {
     background:
-        radial-gradient(circle at 20% 20%, #ffffff66, transparent 25%),
+        radial-gradient(circle at 20% 20%, #ffffff77, transparent 25%),
         linear-gradient(135deg,#2563eb,#db2777,#f59e0b);
 }
 
 body.night {
     background:
-        radial-gradient(circle at 50% 10%, #ffffff33, transparent 25%),
-        linear-gradient(135deg,#020617,#312e81,#581c87);
+        radial-gradient(circle at 50% 5%, #ffffff44, transparent 25%),
+        linear-gradient(135deg,#020617,#172554,#581c87);
 }
 
 body.friend {
     background:
         radial-gradient(circle at 20% 20%, #ffffff55, transparent 30%),
-        linear-gradient(135deg,#0f766e,#16a34a,#65a30d);
+        linear-gradient(135deg,#064e3b,#16a34a,#65a30d);
 }
 
 body.cute {
     background:
-        radial-gradient(circle at 20% 10%, #ffffff66, transparent 30%),
+        radial-gradient(circle at 20% 10%, #ffffff77, transparent 30%),
         linear-gradient(135deg,#fbc2eb,#a6c1ee);
 }
 
@@ -277,22 +284,24 @@ body.dreamy {
     margin: auto;
     padding: 20px 15px;
     position: relative;
-    z-index: 2;
+    z-index: 5;
 }
 
 .card {
     padding: 28px;
     border-radius: 30px;
-    background: rgba(255,255,255,.15);
+    background: rgba(255,255,255,.14);
     border: 1px solid rgba(255,255,255,.30);
-    backdrop-filter: blur(20px);
-    box-shadow: 0 25px 80px rgba(0,0,0,.25);
+    backdrop-filter: blur(22px);
+    -webkit-backdrop-filter: blur(22px);
+    box-shadow: 0 25px 80px rgba(0,0,0,.28);
 }
 
 .logo {
     text-align: center;
-    font-size: 45px;
+    font-size: 48px;
     font-weight: 900;
+    letter-spacing: -2px;
 }
 
 .subtitle {
@@ -303,13 +312,19 @@ body.dreamy {
 
 textarea {
     width: 100%;
-    min-height: 150px;
-    padding: 17px;
+    min-height: 160px;
+    padding: 18px;
     border: 0;
     outline: 0;
     border-radius: 20px;
-    font-size: 16px;
+    font-size: 17px;
     resize: vertical;
+    background: rgba(255,255,255,.95);
+    color: #222;
+}
+
+textarea:focus {
+    box-shadow: 0 0 0 4px rgba(255,255,255,.25);
 }
 
 button {
@@ -321,26 +336,26 @@ button {
     background: white;
     color: #7c3aed;
     font-size: 17px;
-    font-weight: bold;
+    font-weight: 800;
     cursor: pointer;
 }
 
 button:active {
-    transform: scale(.98);
+    transform: scale(.97);
 }
 
 .linkbox {
     margin-top: 20px;
-    padding: 16px;
-    border-radius: 18px;
-    background: rgba(0,0,0,.18);
+    padding: 17px;
+    border-radius: 20px;
+    background: rgba(0,0,0,.20);
 }
 
 .link {
     display: block;
     margin-top: 10px;
-    padding: 12px;
-    border-radius: 12px;
+    padding: 13px;
+    border-radius: 13px;
     background: rgba(255,255,255,.14);
     color: white;
     text-decoration: none;
@@ -365,42 +380,46 @@ button:active {
     justify-content: center;
     align-items: center;
     text-align: center;
-    position: relative;
 }
 
 .emoji {
-    font-size: 75px;
-    animation: pop .8s ease;
+    font-size: 82px;
+    animation: pop .8s cubic-bezier(.17,.67,.3,1.5);
+    filter: drop-shadow(0 10px 20px rgba(0,0,0,.2));
 }
 
 .vibe-title {
-    font-size: 34px;
+    font-size: 36px;
     font-weight: 900;
-    margin: 10px;
+    margin: 12px;
+    animation: titleIn .8s ease;
 }
 
 .vibe-text {
+    max-width: 100%;
     font-size: 22px;
     line-height: 1.65;
     white-space: pre-wrap;
     word-break: break-word;
-    opacity: 0;
-    animation: reveal 1.5s ease forwards;
-    animation-delay: .5s;
+    animation: textIn 1.1s ease;
 }
 
 .badge {
-    margin-top: 18px;
-    padding: 9px 16px;
+    margin-top: 20px;
+    padding: 9px 17px;
     border-radius: 30px;
     background: rgba(255,255,255,.18);
+    font-size: 13px;
 }
 
-.footer {
-    text-align: center;
-    margin-top: 15px;
-    opacity: .65;
-    font-size: 13px;
+.home {
+    width: 100%;
+    max-width: 280px;
+    margin-top: 20px;
+}
+
+.home button {
+    margin-top: 0;
 }
 
 .particles {
@@ -413,47 +432,74 @@ button:active {
 
 .particle {
     position: absolute;
-    bottom: -60px;
-    font-size: 25px;
+    bottom: -70px;
     opacity: 0;
     animation-name: float;
     animation-timing-function: linear;
     animation-iteration-count: infinite;
+    user-select: none;
+}
+
+.footer {
+    text-align: center;
+    margin-top: 15px;
+    opacity: .65;
+    font-size: 13px;
 }
 
 @keyframes float {
     0% {
-        transform: translateY(0) rotate(0deg) scale(.7);
+        transform: translateY(0) rotate(0deg) scale(.6);
         opacity: 0;
     }
-    15% {
-        opacity: .9;
+
+    12% {
+        opacity: .95;
     }
-    85% {
-        opacity: .8;
+
+    80% {
+        opacity: .75;
     }
+
     100% {
-        transform: translateY(-115vh) rotate(360deg) scale(1.2);
+        transform:
+            translateY(-115vh)
+            rotate(360deg)
+            scale(1.25);
         opacity: 0;
     }
 }
 
 @keyframes pop {
     from {
-        transform: scale(.3);
+        transform: scale(.2) rotate(-15deg);
         opacity: 0;
     }
+
     to {
-        transform: scale(1);
+        transform: scale(1) rotate(0);
         opacity: 1;
     }
 }
 
-@keyframes reveal {
+@keyframes titleIn {
     from {
         opacity: 0;
-        transform: translateY(15px);
+        transform: translateY(20px);
     }
+
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+@keyframes textIn {
+    from {
+        opacity: 0;
+        transform: translateY(25px);
+    }
+
     to {
         opacity: 1;
         transform: translateY(0);
@@ -461,35 +507,52 @@ button:active {
 }
 
 @media(max-width:500px) {
+
+    .container {
+        padding: 12px;
+    }
+
     .card {
         padding: 20px;
         border-radius: 25px;
     }
 
     .logo {
-        font-size: 38px;
+        font-size: 40px;
+    }
+
+    .emoji {
+        font-size: 68px;
     }
 
     .vibe-title {
-        font-size: 29px;
+        font-size: 30px;
     }
 
     .vibe-text {
         font-size: 19px;
     }
+
+    textarea {
+        font-size: 16px;
+    }
 }
+
 </style>
 </head>
 
 <body class="{{ page_class }}">
 
 {% if page %}
+
 <div class="particles">
 {{ particles|safe }}
 </div>
+
 {% endif %}
 
 <div class="container">
+
 <div class="card">
 
 {% if page %}
@@ -513,7 +576,10 @@ button:active {
 </div>
 
 <a class="home" href="/">
-<button type="button">✨ Create Your Vibely</button></a>
+<button type="button">
+✨ Create Your Vibely
+</button>
+</a>
 
 </div>
 
@@ -550,48 +616,70 @@ required></textarea>
 {% if link %}
 
 <div class="linkbox">
+
 🔗 Your Vibely Link
 
-<a class="link" href="{{ link }}" id="vibelyLink">
+<a class="link"
+   href="{{ link }}"
+   id="vibelyLink">
 {{ link }}
 </a>
 
 <div class="actions">
+
 <button type="button" onclick="copyLink()">
-📋 Copy Link
+📋 Copy
 </button>
 
 <button type="button" onclick="shareLink()">
 📤 Share
 </button>
+
 </div>
 
 </div>
 
 <script>
-function copyLink() {
-    const link = document.getElementById("vibelyLink").href;
 
-    navigator.clipboard.writeText(link).then(function() {
-        alert("✨ Link copied!");
-    }).catch(function() {
+function copyLink() {
+
+    const link =
+        document.getElementById("vibelyLink").href;
+
+    if (navigator.clipboard) {
+
+        navigator.clipboard.writeText(link)
+        .then(() => alert("✨ Link copied!"))
+        .catch(() => prompt("Copy link:", link));
+
+    } else {
+
         prompt("Copy your Vibely link:", link);
-    });
+
+    }
 }
 
+
 function shareLink() {
-    const link = document.getElementById("vibelyLink").href;
+
+    const link =
+        document.getElementById("vibelyLink").href;
 
     if (navigator.share) {
+
         navigator.share({
             title: "✨ My Vibely",
             text: "I made a Vibely for you 💕",
             url: link
         });
+
     } else {
+
         copyLink();
+
     }
 }
+
 </script>
 
 {% endif %}
@@ -623,12 +711,10 @@ def home():
         if not text:
             return redirect(url_for("home"))
 
+        if len(text) > 1000:
+            text = text[:1000]
+
         mood = detect_mood(text)
-
-        style = request.form.get("style", "cute")
-
-        if not style:
-            style = "cute"
 
         code = secrets.token_urlsafe(8)
 
@@ -636,10 +722,11 @@ def home():
 
         con.execute(
             """
-            INSERT INTO pages(code,text,style,mood)
-            VALUES(?,?,?,?)
+            INSERT INTO pages
+            (code, text, mood, style)
+            VALUES (?, ?, ?, ?)
             """,
-            (code, text, style, mood)
+            (code, text, mood, mood)
         )
 
         con.commit()
@@ -651,9 +738,9 @@ def home():
         HTML,
         title="Vibely",
         page=None,
-        page_class="home-bg",
+        page_class="home",
         link=link,
-        particles="",
+        particles=""
     )
 
 
@@ -664,7 +751,7 @@ def vibe(code):
 
     row = con.execute(
         """
-        SELECT code,text,mood
+        SELECT code, text, mood, style
         FROM pages
         WHERE code=?
         """,
@@ -674,23 +761,38 @@ def vibe(code):
     con.close()
 
     if not row:
-        return "<h1 style='text-align:center'>😢 Vibely not found</h1>", 404
 
-    mood = MOODS.get(row["mood"], MOODS["cute"])
+        return """
+        <div style="
+            font-family:Arial;
+            text-align:center;
+            padding:60px;
+        ">
+            <h1>😢 Vibely not found</h1>
+            <a href="/">✨ Create a new Vibely</a>
+        </div>
+        """, 404
+
+    mood = row["mood"] or row["style"] or "cute"
+
+    if mood not in MOODS:
+        mood = "cute"
+
+    data = MOODS[mood]
 
     page = {
-        "emoji": mood["emoji"],
-        "title": mood["title"],
-        "text": row["text"],
+        "emoji": data["emoji"],
+        "title": data["title"],
+        "text": row["text"]
     }
 
     return render_template_string(
         HTML,
-        title="Vibely • " + mood["title"],
+        title="Vibely • " + data["title"],
         page=page,
-        page_class=mood["class"],
-        particles=particle_html(mood["particles"]),
-        link=None,
+        page_class=data["class"],
+        particles=particle_html(data["particles"]),
+        link=None
     )
 
 
@@ -698,18 +800,18 @@ if __name__ == "__main__":
 
     init_db()
 
+    port = int(os.environ.get("PORT", "5000"))
+
     print("")
     print("=========================")
-    print("        VIBELY 2.0")
+    print("       VIBELY 2.0")
     print("=========================")
     print("Database:", DB)
-    print("http://127.0.0.1:5000")
+    print("Port:", port)
     print("")
-
-    port = int(os.environ.get("PORT", "5000"))
 
     app.run(
         host="0.0.0.0",
         port=port,
-        debug=True
+        debug=False
     )
