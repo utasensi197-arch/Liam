@@ -23,14 +23,17 @@ STYLES = {
 
 
 def db():
-    os.makedirs(os.path.dirname(DB), exist_ok=True)
-    con = sqlite3.connect(DB)
+    # Termux has a writable project directory.
+    # Belmo's /app directory is read-only, so use /tmp there.
+    if os.environ.get("PREFIX", "").startswith("/data/data/com.termux"):
+        data_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data")
+        os.makedirs(data_dir, exist_ok=True)
+        db_path = os.path.join(data_dir, "vibely.db")
+    else:
+        db_path = "/tmp/vibely.db"
+
+    con = sqlite3.connect(db_path)
     con.row_factory = sqlite3.Row
-    return con
-
-
-def init_db():
-    con = db()
 
     con.execute("""
         CREATE TABLE IF NOT EXISTS pages (
@@ -40,8 +43,13 @@ def init_db():
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     """)
-
     con.commit()
+
+    return con
+
+
+def init_db():
+    con = db()
     con.close()
 
 
