@@ -1,10 +1,12 @@
 from flask import Flask, request, render_template_string, redirect, url_for
 import sqlite3
 import secrets
+import os
 
 app = Flask(__name__)
 
-DB = "vibely.db"
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+DB = os.path.join(BASE_DIR, "vibely.db")
 
 STYLES = {
     "cute": ("🌸", "Cute", "Soft • Sweet • Lovely", "cute"),
@@ -17,7 +19,10 @@ STYLES = {
 
 
 def db():
-    return sqlite3.connect(DB)
+    os.makedirs(os.path.dirname(DB), exist_ok=True)
+    con = sqlite3.connect(DB)
+    con.row_factory = sqlite3.Row
+    return con
 
 
 def init_db():
