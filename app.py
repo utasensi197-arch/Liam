@@ -781,10 +781,10 @@ def home():
         con.execute(
             """
             INSERT INTO pages
-            (code, text, mood, style)
-            VALUES (?, ?, ?, ?)
+            (code, text, mood, style, image)
+            VALUES (?, ?, ?, ?, ?)
             """,
-            (code, text, mood, mood)
+            (code, text, mood, mood, image_name)
         )
 
         con.commit()
