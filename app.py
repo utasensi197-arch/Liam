@@ -851,7 +851,8 @@ def vibe(code):
     page = {
         "emoji": data["emoji"],
         "title": data["title"],
-        "text": row["text"]
+        "text": row["text"],
+        "image": row["image"]
     }
 
     return render_template_string(
