@@ -802,6 +802,11 @@ def uploaded_file(filename):
     return send_from_directory(UPLOAD_FOLDER, filename)
 
 
+@app.route("/health")
+def health():
+    return "OK", 200
+
+
 @app.route("/v/<code>")
 def vibe(code):
 
