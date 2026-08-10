@@ -135,7 +135,7 @@ KEYWORDS = {
 
 
 def db():
-    con = sqlite3.connect(DB, timeout=15)
+    con = sqlite3.connect(DB, timeout=10)
     con.row_factory = sqlite3.Row
 
     con.execute("""
@@ -144,12 +144,13 @@ def db():
             text TEXT NOT NULL,
             mood TEXT DEFAULT 'cute',
             style TEXT DEFAULT 'cute',
+            image TEXT,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     """)
 
     columns = {
-        row["name"]
+        row[1]
         for row in con.execute("PRAGMA table_info(pages)").fetchall()
     }
 
@@ -163,14 +164,13 @@ def db():
             "ALTER TABLE pages ADD COLUMN style TEXT DEFAULT 'cute'"
         )
 
+    if "image" not in columns:
+        con.execute(
+            "ALTER TABLE pages ADD COLUMN image TEXT"
+        )
+
     con.commit()
     return con
-
-
-def init_db():
-    con = db()
-    con.close()
-
 
 def detect_mood(text):
     t = text.lower().strip()
