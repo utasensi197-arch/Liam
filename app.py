@@ -1,9 +1,26 @@
-from flask import Flask, request, render_template_string, redirect, url_for
+from flask import Flask, request, render_template_string, redirect, url_for, send_from_directory
 import sqlite3
 import secrets
 import os
 
 app = Flask(__name__)
+
+UPLOAD_FOLDER = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)),
+    "static",
+    "uploads"
+)
+
+os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+
+ALLOWED_EXTENSIONS = {"png", "jpg", "jpeg", "webp", "gif"}
+
+def allowed_file(filename):
+    return (
+        "." in filename
+        and filename.rsplit(".", 1)[1].lower() in ALLOWED_EXTENSIONS
+    )
+
 
 # Termux = persistent local DB
 # Belmo/production = writable temporary DB
@@ -567,6 +584,14 @@ button:active {
 {{ page.title }}
 </div>
 
+{% if page.image %}
+<img
+    src="{{ url_for('uploaded_file', filename=page.image) }}"
+    style="max-width:100%;max-height:420px;object-fit:contain;border-radius:24px;margin:15px 0;box-shadow:0 15px 45px rgba(0,0,0,.25);"
+    alt="Vibely photo"
+>
+{% endif %}
+
 <div class="vibe-text">
 {{ page.text }}
 </div>
@@ -593,7 +618,7 @@ button:active {
 Write a feeling. Vibely turns it into a vibe.
 </div>
 
-<form method="POST">
+<form method="POST" enctype="multipart/form-data">
 
 <textarea
 name="text"
@@ -606,6 +631,20 @@ Happy birthday 🎂
 I miss you 🥺
 Best friend forever 🫶"
 required></textarea>
+
+<div style="margin-top:15px;">
+<label style="display:block;margin-bottom:8px;font-weight:bold;">
+🖼️ Add a photo
+</label>
+
+<input
+    type="file"
+    name="image"
+    accept="image/png,image/jpeg,image/webp,image/gif"
+    style="width:100%;padding:12px;border-radius:15px;background:white;"
+>
+
+</div>
 
 <button type="submit">
 ✨ Create My Vibely
@@ -711,6 +750,17 @@ def home():
         if not text:
             return redirect(url_for("home"))
 
+        image = request.files.get("image")
+        image_name = None
+
+        if image and image.filename:
+            if not allowed_file(image.filename):
+                return "❌ Unsupported image type", 400
+
+            ext = image.filename.rsplit(".", 1)[1].lower()
+            image_name = secrets.token_urlsafe(12) + "." + ext
+            image.save(os.path.join(UPLOAD_FOLDER, image_name))
+
         if len(text) > 1000:
             text = text[:1000]
 
@@ -745,6 +795,11 @@ def home():
         link=link,
         particles=""
     )
+
+
+@app.route("/uploads/<filename>")
+def uploaded_file(filename):
+    return send_from_directory(UPLOAD_FOLDER, filename)
 
 
 @app.route("/v/<code>")
