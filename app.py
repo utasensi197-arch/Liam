@@ -819,7 +819,7 @@ def vibe(code):
 
     row = con.execute(
         """
-        SELECT code, text, mood, style
+        SELECT code, text, mood, style, image
         FROM pages
         WHERE code=?
         """,
